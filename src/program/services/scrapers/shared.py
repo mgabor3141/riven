@@ -2,7 +2,7 @@
 from typing import Dict, Optional, Set, Type, Union
 
 from loguru import logger
-from RTN import RTN, ParsedData, Torrent, sort_torrents
+from RTN import RTN, ParsedData, Torrent, sort_torrents, SettingsModel
 from RTN.exceptions import GarbageTorrent
 
 from program.media.item import Episode, MediaItem, Movie, Season, Show
@@ -24,6 +24,12 @@ parse_debug = settings_manager.settings.scraping.parse_debug
 ranking_settings = settings_manager.settings.ranking
 ranking_model = models.get(ranking_settings.profile)
 rtn = RTN(ranking_settings, ranking_model)
+
+anime_ranking_settings = SettingsModel(**ranking_settings.dict())
+anime_ranking_settings.preferred = list(ranking_settings.preferred) + ["eng?.*jap?", "jap?.*eng?", "Dual.Audio"]
+anime_ranking_settings.languages.required = ["anime"]
+anime_ranking_settings.languages.preferred = []
+rtn_anime = RTN(anime_ranking_settings, ranking_model)
 
 
 class ScraperRequestHandler(BaseRequestHandler):
@@ -65,7 +71,10 @@ def _parse_results(item: MediaItem, results: Dict[str, str], log_msg: bool = Tru
             continue
 
         try:
-            torrent: Torrent = rtn.rank(
+            # Choose the appropriate RTN instance based on whether the item is anime
+            rtn_instance = rtn_anime if item.is_anime else rtn
+
+            torrent: Torrent = rtn_instance.rank(
                 raw_title=raw_title,
                 infohash=infohash,
                 correct_title=correct_title,
@@ -146,6 +155,14 @@ def _parse_results(item: MediaItem, results: Dict[str, str], log_msg: bool = Tru
 
     if torrents:
         logger.log("SCRAPER", f"Found {len(torrents)} streams for {item.log_string}")
+
+        # Hack RTN to consider 1080p in the same bucket as 4K so that they are sorted purely by rank (some 4K streams are garbage and/or upscaled)
+        torrents = {
+            torrent.copy(update={"data": torrent.data.copy(update={"resolution": "4k"}), "rank": round(torrent.rank / 10)})
+            if torrent.data.resolution == "1080p" else torrent
+            for torrent in torrents
+        }
+
         torrents = sort_torrents(torrents, bucket_limit=bucket_limit)
         torrents_dict = {}
         for torrent in torrents.values():
