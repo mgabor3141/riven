@@ -221,17 +221,32 @@ async def add_items(request: Request, imdb_ids: str = None) -> MessageResponse:
 )
 async def get_item(_: Request, id: str, use_tmdb_id: Optional[bool] = False) -> dict:
     with db.Session() as session:
+        query = select(MediaItem)
+        if use_tmdb_id:
+            query = query.where(MediaItem.tmdb_id == id).where(MediaItem.type.in_(["movie", "show"]))
+        else:
+            query = query.where(MediaItem.id == id)
         try:
-            query = select(MediaItem)
-            if use_tmdb_id:
-                query = query.where(MediaItem.tmdb_id == id)
-            else:
-                query = query.where(MediaItem.id == id)
-            item = session.execute(query).unique().scalar_one()
+            item = session.execute(query).unique().scalar_one_or_none()
+            if item:
+                return item.to_extended_dict(with_streams=False)
+            raise NoResultFound
         except NoResultFound:
+            if use_tmdb_id:
+                logger.debug(f"Item with TMDB ID {id} not found in database")
+            else:
+                logger.debug(f"Item with ID {id} not found in database")
             raise HTTPException(status_code=404, detail="Item not found")
-        return item.to_extended_dict(with_streams=False)
-
+        except Exception as e:
+            if "Multiple rows were found when one or none was required" in str(e):
+                duplicate_ids = set()
+                items = session.execute(query).unique().scalars().all()
+                for item in items:
+                    duplicate_ids.add(item.id)
+                logger.debug(f"Multiple items found with ID {id}: {duplicate_ids}")
+            else:
+                logger.error(f"Error fetching item with ID {id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get(
     "/{imdb_ids}",
@@ -271,8 +286,14 @@ async def reset_items(request: Request, ids: str) -> ResetResponse:
         for media_item in db_functions.get_items_by_ids(ids):
             try:
                 request.app.program.em.cancel_job(media_item.id)
+                active_hash = media_item.active_stream.get("infohash", None)
+                active_stream = next((stream for stream in media_item.streams if stream.infohash == active_hash), None)
                 db_functions.clear_streams(media_item)
                 db_functions.reset_media_item(media_item)
+                if active_stream:
+                    # lets blacklist the active stream so it doesnt get used again
+                    db_functions.blacklist_stream(media_item, active_stream)
+                    logger.debug(f"Blacklisted stream {active_hash} for item {media_item.log_string}")
             except ValueError as e:
                 logger.error(f"Failed to reset item with id {media_item.id}: {str(e)}")
                 continue
@@ -432,6 +453,31 @@ async def unblacklist_stream(_: Request, item_id: str, stream_id: int, db: Sessi
 
     return {
         "message": f"Unblacklisted stream {stream_id} for item {item_id}",
+    }
+
+@router.post(
+    "/{item_id}/streams/reset",
+    summary="Reset Media Item Streams",
+    description="Reset all streams for a media item",
+    operation_id="reset_item_streams",
+)
+async def reset_item_streams(_: Request, item_id: str, db: Session = Depends(get_db)):
+    item: MediaItem = (
+        db.execute(
+            select(MediaItem)
+            .where(MediaItem.id == item_id)
+        )
+        .unique()
+        .scalar_one_or_none()
+    )
+
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    db_functions.clear_streams(item)
+
+    return {
+        "message": f"Successfully reset streams for item {item_id}",
     }
 
 class PauseResponse(BaseModel):

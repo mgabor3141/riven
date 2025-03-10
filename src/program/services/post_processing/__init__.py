@@ -29,6 +29,7 @@ class PostProcessing:
             clear_streams(item)
         yield item
 
+
 def notify(item: MediaItem):
     show = None
     if item.type in ["show", "movie"]:

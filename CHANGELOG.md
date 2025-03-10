@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.21.4](https://github.com/rivenmedia/riven/compare/v0.21.3...v0.21.4) (2025-02-28)
+
+
+### Bug Fixes
+
+* frontend missing buttons. updated PTT. ([31b29f7](https://github.com/rivenmedia/riven/commit/31b29f7114f4ea6944332c2670afc8c0816d9da1))
+
+## [0.21.3](https://github.com/rivenmedia/riven/compare/v0.21.2...v0.21.3) (2025-02-28)
+
+
+### Bug Fixes
+
+* multiple logging improvements and various other fixes ([#1015](https://github.com/rivenmedia/riven/issues/1015)) ([5185dbd](https://github.com/rivenmedia/riven/commit/5185dbd8ab62953c55aba2e958d098b828d56174))
+
+## [0.21.2](https://github.com/rivenmedia/riven/compare/v0.21.1...v0.21.2) (2025-02-26)
+
+
+### Bug Fixes
+
+* reverted postprocessing to patch subliminal issue ([ebc7fc9](https://github.com/rivenmedia/riven/commit/ebc7fc970cea37480db51ece2c670056c2da5239))
+
+## [0.21.1](https://github.com/rivenmedia/riven/compare/v0.21.0...v0.21.1) (2025-02-25)
+
+
+### Bug Fixes
+
+* correct cache usage logic in TraktAPI ([6405dd6](https://github.com/rivenmedia/riven/commit/6405dd6b88e725af03e3a9d4a4737f03164a4017))
+* ensure item retrieval returns a valid result in get_item function ([2523993](https://github.com/rivenmedia/riven/commit/25239939a5916f6d3d3fd3018ce58be3033f9b9d))
+* minor tweaks and validation handling ([#1009](https://github.com/rivenmedia/riven/issues/1009)) ([41509ba](https://github.com/rivenmedia/riven/commit/41509bacfc6b712316d57dfba6529c55707c1b7f))
+
 ## [0.21.0](https://github.com/rivenmedia/riven/compare/v0.20.1...v0.21.0) (2025-02-20)
 
 
