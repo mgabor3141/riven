@@ -4,7 +4,6 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import List, Optional, Union
 from urllib.parse import urlencode
-
 from requests import RequestException, Session
 
 from program import MediaItem
@@ -37,7 +36,8 @@ class TraktRequestHandler(BaseRequestHandler):
 class TraktAPI:
     """Handles Trakt API communication"""
     BASE_URL = "https://api.trakt.tv"
-    CLIENT_ID = "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3"
+    CLIENT_ID = os.environ.get("TRAKT_API_CLIENT_ID", "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3")
+    logger.debug(f"Trakt Client ID: {CLIENT_ID[:4]}...{CLIENT_ID[-4:]}")
 
     patterns: dict[str, re.Pattern] = {
         "user_list": re.compile(r"https://trakt.tv/users/([^/]+)/lists/([^/]+)"),
@@ -197,7 +197,11 @@ class TraktAPI:
     def create_item_from_imdb_id(self, imdb_id: str, type: str = None) -> Optional[MediaItem]:
         """Wrapper for trakt.tv API search method."""
         url = f"{self.BASE_URL}/search/imdb/{imdb_id}?extended=full"
-        response = self.request_handler.execute(HttpMethod.GET, url, timeout=30)
+        try:
+            response = self.request_handler.execute(HttpMethod.GET, url, timeout=30)
+        except TraktAPIError as e:
+            logger.error(f"Failed to create item using imdb id: {imdb_id} - {str(e)}")
+            return None
         if not response.is_ok or not response.data:
             logger.error(
                 f"Failed to create item using imdb id: {imdb_id}")  # This returns an empty list for response.data
@@ -257,11 +261,11 @@ class TraktAPI:
         genres = getattr(data, "genres", None) or show_genres
 
         item = {
-            "trakt_id": data.ids.trakt,
             "title": getattr(data, "title", None),
             "year": getattr(data, "year", None),
             "status": getattr(data, "status", None),
             "aired_at": formatted_aired_at,
+            "trakt_id": getattr(data.ids, "trakt", None),
             "imdb_id": getattr(data.ids, "imdb", None),
             "tvdb_id": getattr(data.ids, "tvdb", None),
             "tmdb_id": getattr(data.ids, "tmdb", None),
@@ -273,12 +277,7 @@ class TraktAPI:
             "type": item_type,
         }
 
-        item["is_anime"] = (
-            ("anime" in genres)
-            or ("animation" in genres and (item["country"] in ("jp", "kr") or item["language"] == "ja"))
-            if genres
-            else False
-        )
+        item["is_anime"] = self._is_anime(item)
 
         match item_type:
             case "movie":
@@ -367,3 +366,20 @@ class TraktAPI:
         if item_type == "movie" and (released := getattr(data, "released", None)):
             return datetime.strptime(released, "%Y-%m-%d")
         return None
+
+    def _is_anime(self, item: dict) -> bool:
+        """Check if the item is an anime."""
+        if item.get("type") in ("season", "episode"):
+            # We get this from show item and copy it down to season and episode. No need to check again.
+            return False
+
+        if not item.get("genres") or item.get("country") == "us":
+            return False
+
+        if not any(genre in item.get("genres", []) for genre in ["animation", "donghua", "anime"]):
+            return False
+
+        if item.get("country", "") not in ["jp", "kr", "cn", "hk"]:
+            return False
+
+        return True

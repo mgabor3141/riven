@@ -217,7 +217,7 @@ def find_broken_symlinks(directory: str) -> list[tuple[str, str]]:
                     broken_symlinks.append((full_path, target))
     return broken_symlinks
 
-def fix_broken_symlinks(library_path, rclone_path, max_workers=4):
+def fix_broken_symlinks(library_path, rclone_path, max_workers=4, specific_directory: Optional[str] = None):
     """Find and fix all broken symlinks in the library path using files from the rclone path."""
     missing_files = 0
 
@@ -277,6 +277,10 @@ def fix_broken_symlinks(library_path, rclone_path, max_workers=4):
 
     def process_directory(directory, file_map):
         """Process a single directory for broken symlinks."""
+        if "music" in directory or "pictures" in directory:
+            logger.log("FILES", f"Skipping {directory} as it's a music or picture directory.")
+            return
+
         local_broken_symlinks = find_broken_symlinks(directory)
         logger.log("FILES", f"Found {len(local_broken_symlinks)} broken symlinks in {directory}")
         if not local_broken_symlinks:
@@ -297,11 +301,16 @@ def fix_broken_symlinks(library_path, rclone_path, max_workers=4):
 
     logger.debug(f"Built file map for {rclone_path}")
 
-    top_level_dirs = [os.path.join(library_path, d) for d in os.listdir(library_path) if os.path.isdir(os.path.join(library_path, d))]
-    logger.debug(f"Found top-level directories: {top_level_dirs}")
+    if specific_directory:
+        library_paths = [specific_directory]
+        logger.debug(f"Found specific directory: {library_paths}")
+    else:
+        valid_dirs = ["shows", "movies", "anime_shows", "anime_movies"]
+        library_paths = [os.path.join(library_path, d) for d in valid_dirs if os.path.isdir(os.path.join(library_path, d))]
+        logger.debug(f"Found top-level directories: {library_paths}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_directory, directory, file_map) for directory in top_level_dirs]
+        futures = [executor.submit(process_directory, directory, file_map) for directory in library_paths]
         if not futures:
             logger.log("FILES", f"No directories found in {library_path}. Aborting fix_broken_symlinks.")
             return
@@ -313,9 +322,9 @@ def fix_broken_symlinks(library_path, rclone_path, max_workers=4):
     logger.log("FILES", f"Finished processing and retargeting broken symlinks. Time taken: {elapsed_time:.2f} seconds.")
     logger.log("FILES", f"Reset {missing_files} items to be rescraped due to missing rclone files.")
 
-def get_items_from_filepath(session: Session, filepath: str) -> "MediaItem":
+def get_items_from_filepath(session: Session, filepath: str) -> list["MediaItem"]:
     """Get an item by its filepath."""
-    from program.db.db_functions import get_items_from_filter, ItemFilter
+    from program.db.db_functions import get_item_by_imdb_and_episode, get_item_by_symlink_path
 
     imdb_id_match = imdbid_pattern.search(filepath)
     season_number_match = season_pattern.search(filepath)
@@ -329,30 +338,9 @@ def get_items_from_filepath(session: Session, filepath: str) -> "MediaItem":
     season_number = int(season_number_match.group(1)) if season_number_match else None
     episode_number = int(episode_number_match.group(1)) if episode_number_match else None
 
-    def get_by_symlink_path(session: Session, filepath: str) -> list["MediaItem"]:
-        if season_number and episode_number:
-            filter = ItemFilter(symlink_path=filepath, type=["episode"])
-        else:
-            filter = ItemFilter(symlink_path=filepath, type=["movie"])
-        return get_items_from_filter(session, filter)
-
-    def get_by_direct_lookup(session: Session, imdb_id: str, season_number: int, episode_number: int) -> list["MediaItem"]:
-        if season_number and episode_number:
-            filter = ItemFilter(imdb_id=imdb_id, season_number=season_number, episode_number=episode_number, type=["episode"])
-        else:
-            filter = ItemFilter(imdb_id=imdb_id, type=["movie"])
-        return get_items_from_filter(session, filter)
-
     with session:
-        symlink_path_items = get_by_symlink_path(session, filepath)
-        if not symlink_path_items:
-            items = get_by_direct_lookup(session, imdb_id, season_number, episode_number)
-        else:
-            items = symlink_path_items
-
-        if len(items) > 1:
-            for item in items:
-                # This should never happen, but just in case
-                logger.log("FILES", f"Found (multiple) {item.log_string} from filepath: {filepath}")
+        items = get_item_by_symlink_path(filepath, session)
+        if not items:
+            items = get_item_by_imdb_and_episode(imdb_id, season_number, episode_number, session)
 
         return items

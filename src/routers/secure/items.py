@@ -1,9 +1,11 @@
 import asyncio
 from datetime import datetime
+import os
 from typing import Literal, Optional
 
 import Levenshtein
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from RTN import parse_media_file
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
@@ -17,6 +19,8 @@ from program.media.state import States
 from program.services.content import Overseerr
 from program.symlink import Symlinker
 from program.types import Event
+from program.services.libraries.symlink import fix_broken_symlinks
+from program.settings.manager import settings_manager
 
 from ..models.shared import MessageResponse
 
@@ -232,10 +236,6 @@ async def get_item(_: Request, id: str, use_tmdb_id: Optional[bool] = False) -> 
                 return item.to_extended_dict(with_streams=False)
             raise NoResultFound
         except NoResultFound:
-            if use_tmdb_id:
-                logger.debug(f"Item with TMDB ID {id} not found in database")
-            else:
-                logger.debug(f"Item with ID {id} not found in database")
             raise HTTPException(status_code=404, detail="Item not found")
         except Exception as e:
             if "Multiple rows were found when one or none was required" in str(e):
@@ -249,7 +249,7 @@ async def get_item(_: Request, id: str, use_tmdb_id: Optional[bool] = False) -> 
             raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get(
-    "/{imdb_ids}",
+    "/imdb/{imdb_ids}",
     summary="Retrieve Media Items By IMDb IDs",
     description="Fetch media items by IMDb IDs",
     operation_id="get_items_by_imdb_ids",
@@ -260,7 +260,7 @@ async def get_items_by_imdb_ids(request: Request, imdb_ids: str) -> list[dict]:
         items = []
         for id in ids:
             item = (
-                session.execute(select(MediaItem).where(MediaItem.imdb_id == id))
+                session.execute(select(MediaItem).where(MediaItem.imdb_id == id).where(MediaItem.type.in_(["movie", "show"])))
                 .unique()
                 .scalar_one()
             )
@@ -335,6 +335,69 @@ async def retry_items(request: Request, ids: str) -> RetryResponse:
     return {"message": f"Retried items with ids {ids}", "ids": ids}
 
 
+@router.post(
+    "/retry_library",
+    summary="Retry Library Items",
+    description="Retry items in the library that failed to download",
+    operation_id="retry_library_items",
+)
+async def retry_library_items(request: Request) -> RetryResponse:
+    with db.Session() as session:
+        item_ids = db_functions.retry_library(session)
+        for item_id in item_ids:
+            request.app.program.em.add_event(Event(emitted_by="RetryLibrary", item_id=item_id))
+    return {"message": f"Retried {len(item_ids)} items", "ids": item_ids}
+
+
+class UpdateOngoingResponse(BaseModel):
+    message: str
+    updated_items: list[dict]
+
+
+@router.post(
+    "/update_ongoing",
+    summary="Update Ongoing Items",
+    description="Update state for ongoing and unreleased items",
+    operation_id="update_ongoing_items",
+)
+async def update_ongoing_items(request: Request) -> UpdateOngoingResponse:
+    with db.Session() as session:
+        updated_items = db_functions.update_ongoing(session)
+        for item_id, previous_state, new_state in updated_items:
+            request.app.program.em.add_event(Event(emitted_by="UpdateOngoing", item_id=item_id))
+    return {
+        "message": f"Updated {len(updated_items)} items",
+        "updated_items": [
+            {"item_id": item_id, "previous_state": previous_state, "new_state": new_state}
+            for item_id, previous_state, new_state in updated_items
+        ]
+    }
+
+class RepairSymlinksResponse(BaseModel):
+    message: str
+
+@router.post(
+    "/repair_symlinks",
+    summary="Repair Broken Symlinks",
+    description="Repair broken symlinks in the library. Optionally, provide a directory path to only scan that directory.",
+    operation_id="repair_symlinks",
+)
+async def repair_symlinks(request: Request, directory: Optional[str] = None) -> RepairSymlinksResponse:
+    library_path = settings_manager.settings.symlink.library_path
+    rclone_path = settings_manager.settings.symlink.rclone_path
+
+    if directory:
+        specific_directory = os.path.join(library_path, directory)
+        if not os.path.isdir(specific_directory):
+            raise HTTPException(status_code=400, detail=f"Directory {specific_directory} does not exist.")
+    else:
+        specific_directory = None
+
+    fix_broken_symlinks(library_path, rclone_path, specific_directory=specific_directory)
+
+    return {"message": "Symlink repair process completed."}
+
+
 class RemoveResponse(BaseModel):
     message: str
     ids: list[str]
@@ -350,22 +413,19 @@ async def remove_item(request: Request, ids: str) -> RemoveResponse:
     ids: list[str] = handle_ids(ids)
     try:
         media_items: list[MediaItem] = db_functions.get_items_by_ids(ids, ["movie", "show"])
-        if not media_items:
-            return HTTPException(status_code=404, detail="Item(s) not found")
+        if not media_items or not all(isinstance(item, MediaItem) for item in media_items):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item(s) not found")
         for item in media_items:
+            if not item or not isinstance(item, MediaItem):
+                continue
             logger.debug(f"Removing item with ID {item.id}")
-            request.app.program.em.cancel_job(item.id)
+            request.app.program.em.cancel_job(item.id)  # this will cancel the item and all its children
             await asyncio.sleep(0.2)  # Ensure cancellation is processed
             if item.type == "show":
                 for season in item.seasons:
                     for episode in season.episodes:
-                        request.app.program.em.cancel_job(episode.id)
-                        await asyncio.sleep(0.2)
                         db_functions.delete_media_item_by_id(episode.id)
-                    request.app.program.em.cancel_job(season.id)
-                    await asyncio.sleep(0.2)
                     db_functions.delete_media_item_by_id(season.id)
-
             db_functions.clear_streams_by_id(item.id)
 
             symlink_service = request.app.program.services.get(Symlinker)
@@ -532,7 +592,7 @@ async def unpause_items(request: Request, ids: str) -> PauseResponse:
             for media_item in db_functions.get_items_by_ids(ids):
                 try:
                     if media_item.last_state == States.Paused:
-                        media_item.store_state(None) # recheck the last state
+                        media_item.store_state(States.Requested)
                         session.merge(media_item)
                         session.commit()
                         request.app.program.em.add_event(Event("RetryItem", media_item.id))
@@ -546,3 +606,43 @@ async def unpause_items(request: Request, ids: str) -> PauseResponse:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"message": f"Successfully unpaused items.", "ids": ids}
+
+
+class FfprobeResponse(BaseModel):
+    message: str
+    data: dict
+
+@router.post(
+    "/ffprobe",
+    summary="Parse Media File",
+    description="Parse a media file",
+    operation_id="ffprobe_media_files",
+)
+async def ffprobe_symlinks(request: Request, id: str) -> FfprobeResponse:
+    """Parse all symlinks from item. Requires ffmpeg to be installed."""
+    item: MediaItem = db_functions.get_item_by_id(id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    data = {}
+    try:
+        if item.type in ("movie", "episode"):
+            if item.symlink_path:
+                data[item.id] = parse_media_file(item.symlink_path)
+
+        elif item.type == "show":
+            for season in item.seasons:
+                for episode in season.episodes:
+                    if episode.symlink_path:
+                        data[episode.id] = parse_media_file(episode.symlink_path)
+
+        elif item.type == "season":
+            for episode in item.episodes:
+                if episode.symlink_path:
+                    data[episode.id] = parse_media_file(episode.symlink_path)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    if data:
+        return FfprobeResponse(message=f"Successfully parsed media files for item {id}", data=data)
+    return FfprobeResponse(message=f"No media files found for item {id}", data={})

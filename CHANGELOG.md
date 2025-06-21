@@ -1,5 +1,151 @@
 # Changelog
 
+## [0.21.21](https://github.com/rivenmedia/riven/compare/v0.21.20...v0.21.21) (2025-05-12)
+
+
+### Bug Fixes
+
+* anime fix for non-anime related content ([a19e09e](https://github.com/rivenmedia/riven/commit/a19e09e91ca3a31c39563f25e9d8cbc4eca98319))
+* copy attrs down to episode as well ([0372ad5](https://github.com/rivenmedia/riven/commit/0372ad5c6c35815d882a5f915d0f3fc3331aa403))
+* fixed bug on failing to lowercase during anime check ([9c0ea94](https://github.com/rivenmedia/riven/commit/9c0ea94fe928ffc68417a93eb5439a2c70b05b0c))
+* further improvements to validations ([f0f1a3b](https://github.com/rivenmedia/riven/commit/f0f1a3ba17129406dd0dc4ea4e008ddfc35183e9))
+* im going back to bed.. ([853586f](https://github.com/rivenmedia/riven/commit/853586f9c6181cfdae763bd6b19db3444499f31c))
+* restrict usage of comet from elfhosted instances ([77117db](https://github.com/rivenmedia/riven/commit/77117db99c2c8a78fc814aac4c42e57790744500))
+* restrict usage of mediafusion from elfhosted instances ([38fc68b](https://github.com/rivenmedia/riven/commit/38fc68bc3bebd6d38cf56d713a94c7013d3d6929))
+
+## [0.21.20](https://github.com/rivenmedia/riven/compare/v0.21.19...v0.21.20) (2025-04-26)
+
+
+### Bug Fixes
+
+* improve skipping special episodes/seasons ([2d3f927](https://github.com/rivenmedia/riven/commit/2d3f9274a5f4cea7bd6c8924363e6df306d8a977))
+* improved logging on retry_library and update_ongoing for clarity ([01554a5](https://github.com/rivenmedia/riven/commit/01554a5e3b93d1f8a02b7e5630e0e358ea8fb1e0))
+* notifications simplified. fixed anime type check on chinese and korean anime. ([7a98d75](https://github.com/rivenmedia/riven/commit/7a98d7512fe3416de7d8d940527a1459a1fdef4f))
+* update parsett from 1.6.7 to 1.6.11 (latest) ([e8e16cb](https://github.com/rivenmedia/riven/commit/e8e16cbeb415a867ef08eea047cda4d34cc885e7))
+
+## [0.21.19](https://github.com/rivenmedia/riven/compare/v0.21.18...v0.21.19) (2025-04-10)
+
+
+### Bug Fixes
+
+* duplicate notifications being sent when using multiple service urls ([#1059](https://github.com/rivenmedia/riven/issues/1059)) ([5408d55](https://github.com/rivenmedia/riven/commit/5408d55a8c152e7ff0d61a00866b186059ab1eb4))
+
+## [0.21.18](https://github.com/rivenmedia/riven/compare/v0.21.17...v0.21.18) (2025-04-03)
+
+
+### Bug Fixes
+
+* add ffprobe endpoint. fixed trakt id getattr on item. ([a1b23ad](https://github.com/rivenmedia/riven/commit/a1b23ad69338cf48c43f9ef4fa2a0121babd026c))
+
+## [0.21.17](https://github.com/rivenmedia/riven/compare/v0.21.16...v0.21.17) (2025-04-01)
+
+
+### Bug Fixes
+
+* switch scrape endpoint to list input ([9ef5751](https://github.com/rivenmedia/riven/commit/9ef5751e3caa2022eeb0400de4ee80069e55abbd))
+
+## [0.21.16](https://github.com/rivenmedia/riven/compare/v0.21.15...v0.21.16) (2025-04-01)
+
+
+### Bug Fixes
+
+* add calendar and parse endpoints ([78445af](https://github.com/rivenmedia/riven/commit/78445af572152a0f45e68efedefd33b9b436fbf6))
+
+## [0.21.15](https://github.com/rivenmedia/riven/compare/v0.21.14...v0.21.15) (2025-03-30)
+
+
+### Bug Fixes
+
+* get your shit together goldyy ([19522df](https://github.com/rivenmedia/riven/commit/19522df4b967aae144895043024a86d4785eb2eb))
+
+## [0.21.14](https://github.com/rivenmedia/riven/compare/v0.21.13...v0.21.14) (2025-03-30)
+
+
+### Bug Fixes
+
+* add summary and operation ID to abort manual scraping session endpoint ([28be3d7](https://github.com/rivenmedia/riven/commit/28be3d79f0ef3bd10b253afe94fc955900e647f5))
+* fixed resume button in frontend, notifications for shows, and alldebrid missing path attr bug ([7fa60f1](https://github.com/rivenmedia/riven/commit/7fa60f1588797c5b28a3ce573cff31347e9cd362))
+* jellyfin updating using wrong endpoint ([07e2b84](https://github.com/rivenmedia/riven/commit/07e2b8483acd48c1525030920d9f2b3c23a06766))
+* missing stream for completed item. ([11379dd](https://github.com/rivenmedia/riven/commit/11379dd6e863ce97139f64f422ac95f2b751f30a))
+* raise instead of return on remove api endpoint ([1fb4574](https://github.com/rivenmedia/riven/commit/1fb45746f39c4db2b8d029f285a5b9c7798935a6))
+* rewrite prowlarr ([b13a52f](https://github.com/rivenmedia/riven/commit/b13a52ff70b034bcb36d3dacdb9c78acd63fa6e3))
+* season attr bug in prowlarr ([f253cd4](https://github.com/rivenmedia/riven/commit/f253cd457f4777563437748877a0a8118859da23))
+* update comet scraper ([9163c43](https://github.com/rivenmedia/riven/commit/9163c43a98c080898623d7f1b26acac890ad7046))
+* use temp request handler on fetching indexers ([343bc55](https://github.com/rivenmedia/riven/commit/343bc553439188aeaa2bbb3de136c5dd30487a76))
+* wrong attr in prowlar scraper ([b23339a](https://github.com/rivenmedia/riven/commit/b23339a3a862ed0392437ff0823b501be77bb449))
+
+## [0.21.13](https://github.com/rivenmedia/riven/compare/v0.21.12...v0.21.13) (2025-03-18)
+
+
+### Bug Fixes
+
+* updated parsett to 1.6.2. made cached status false by default in api ([b9ae02e](https://github.com/rivenmedia/riven/commit/b9ae02e0cd9072691e1fd7eba8413fd54f359b85))
+
+## [0.21.12](https://github.com/rivenmedia/riven/compare/v0.21.11...v0.21.12) (2025-03-18)
+
+
+### Bug Fixes
+
+* add cache status on manual scrape (revert) ([26b85d8](https://github.com/rivenmedia/riven/commit/26b85d862aab7109bc8eaf9e3cccaa1e76109c80))
+
+## [0.21.11](https://github.com/rivenmedia/riven/compare/v0.21.10...v0.21.11) (2025-03-18)
+
+
+### Bug Fixes
+
+* fixed duplicate imdb endpoint. better handling of indexing bad items during scraping ([f6595fc](https://github.com/rivenmedia/riven/commit/f6595fceb5a200beb5fe09d3a46f618e40666695))
+
+## [0.21.10](https://github.com/rivenmedia/riven/compare/v0.21.9...v0.21.10) (2025-03-18)
+
+
+### Bug Fixes
+
+* fixed api endpoints. tidied logging. fixed show/season not black… ([#1036](https://github.com/rivenmedia/riven/issues/1036)) ([0b84cca](https://github.com/rivenmedia/riven/commit/0b84ccaa7ad09a1bb178c09e8c57847b72422577))
+
+## [0.21.9](https://github.com/rivenmedia/riven/compare/v0.21.8...v0.21.9) (2025-03-13)
+
+
+### Bug Fixes
+
+* improve episode validation on manual scrape ([1f866d6](https://github.com/rivenmedia/riven/commit/1f866d62b82383b240c8f7adb149c3e6ff17ae86))
+
+## [0.21.8](https://github.com/rivenmedia/riven/compare/v0.21.7...v0.21.8) (2025-03-13)
+
+
+### Bug Fixes
+
+* fixed season and episode manual scrape session handling ([59f1e75](https://github.com/rivenmedia/riven/commit/59f1e751f87f912bfd2fc87c647bdf2f7fd54ee7))
+
+## [0.21.7](https://github.com/rivenmedia/riven/compare/v0.21.6...v0.21.7) (2025-03-13)
+
+
+### Bug Fixes
+
+* reorder stream addition to item on manual scrape ([7c351cf](https://github.com/rivenmedia/riven/commit/7c351cfd1770767dc112000fb7f4a397ce26000c))
+
+## [0.21.6](https://github.com/rivenmedia/riven/compare/v0.21.5...v0.21.6) (2025-03-13)
+
+
+### Bug Fixes
+
+* improved episode handling on manual scraping ([#1025](https://github.com/rivenmedia/riven/issues/1025)) ([a949d94](https://github.com/rivenmedia/riven/commit/a949d94eed3af6308915c01596861da3b9782fcc))
+
+## [0.21.5](https://github.com/rivenmedia/riven/compare/v0.21.4...v0.21.5) (2025-03-12)
+
+
+### Bug Fixes
+
+* added reset streams endpoint ([0f22105](https://github.com/rivenmedia/riven/commit/0f221058d9689c8ddc44fd68a257bf66315f454e))
+* fixed blacklist loop on symlink failure. improved scrape on non anime show packs. ([4f29e97](https://github.com/rivenmedia/riven/commit/4f29e9797ddd45f208a902b004fd781d3eb028d8))
+* fixed rd downloading issue. added symlink repair api endpoint. ([0354889](https://github.com/rivenmedia/riven/commit/0354889b9f5db7b64ac5e252437ef0d88f669939))
+* fixed symlink repair. added update_ongoing and retry_library as api endpoints. ([b7c3c97](https://github.com/rivenmedia/riven/commit/b7c3c970ba7ae583c1fe71d7f45fbfca81be178c))
+* increased episode check on show/season packs from 1 to 7 ([fb24ab4](https://github.com/rivenmedia/riven/commit/fb24ab4bd58c5551cd0abf3bc8f8eefbfe2766a9))
+* revert trakt cache checking in api ([5778217](https://github.com/rivenmedia/riven/commit/5778217f370bf1c30bb5a07b1f2bf9d48194d528))
+* symlink repair error due to missing import ([c01bbff](https://github.com/rivenmedia/riven/commit/c01bbffcb9e7f1381f09070b3efab87e125b6cc7))
+* update instance availability logic for the scrape endpoint ([#1023](https://github.com/rivenmedia/riven/issues/1023)) ([486bbff](https://github.com/rivenmedia/riven/commit/486bbfffdfbb5f3afc3196af56019c8eee681655))
+* update instance availibility logic for the scrape endpoint ([486bbff](https://github.com/rivenmedia/riven/commit/486bbfffdfbb5f3afc3196af56019c8eee681655))
+* various fixes. improved scraping and downloading. ([#1024](https://github.com/rivenmedia/riven/issues/1024)) ([ba57f75](https://github.com/rivenmedia/riven/commit/ba57f75bee691e25cd37bd78e918703fd75094ae))
+
 ## [0.21.4](https://github.com/rivenmedia/riven/compare/v0.21.3...v0.21.4) (2025-02-28)
 
 

@@ -1,12 +1,10 @@
-import time
 from datetime import datetime
 from typing import List, Optional, Union
 
 from loguru import logger
-from requests import Session, exceptions
+from requests import Session
 
 from program.services.downloaders.models import (
-    VALID_VIDEO_EXTENSIONS,
     DebridFile,
     InvalidDebridFileException,
     TorrentContainer,
@@ -22,54 +20,60 @@ from program.utils.request import (
 )
 
 from .shared import DownloaderBase, premium_days_left
+from program.utils import get_version
 
 
-class RealDebridError(Exception):
-    """Base exception for Real-Debrid related errors"""
+class TorBoxError(Exception):
+    """Base exception for TorBox related errors"""
 
-class RealDebridRequestHandler(BaseRequestHandler):
+class TorBoxRequestHandler(BaseRequestHandler):
     def __init__(self, session: Session, base_url: str, request_logging: bool = False):
-        super().__init__(session, response_type=ResponseType.DICT, base_url=base_url, custom_exception=RealDebridError, request_logging=request_logging)
+        super().__init__(session, response_type=ResponseType.DICT, base_url=base_url, custom_exception=TorBoxError, request_logging=request_logging)
 
     def execute(self, method: HttpMethod, endpoint: str, **kwargs) -> Union[dict, list]:
         response = super()._request(method, endpoint, **kwargs)
         if response.status_code == 204:
             return {}
         if not response.data and not response.is_ok:
-            raise RealDebridError("Invalid JSON response from RealDebrid")
-        return response.data
+            raise TorBoxError("Invalid JSON response from TorBox")
+        return response.data.get("data", response.data)
 
-class RealDebridAPI:
-    """Handles Real-Debrid API communication"""
-    BASE_URL = "https://api.real-debrid.com/rest/1.0"
+class TorBoxAPI:
+    """Handles TorBox API communication"""
+    BASE_URL = "https://api.torbox.app/v1/api"
 
     def __init__(self, api_key: str, proxy_url: Optional[str] = None):
         self.api_key = api_key
         rate_limit_params = get_rate_limit_params(per_minute=60)
         self.session = create_service_session(rate_limit_params=rate_limit_params)
         self.session.headers.update({"Authorization": f"Bearer {api_key}"})
+        try:
+            version = get_version()
+        except Exception:
+            version = "Unknown"
+        self.session.headers.update({"User-Agent": f"Riven/{version} TorBox/1.0"})
         if proxy_url:
             self.session.proxies = {"http": proxy_url, "https": proxy_url}
-        self.request_handler = RealDebridRequestHandler(self.session, self.BASE_URL)
+        self.request_handler = TorBoxRequestHandler(self.session, self.BASE_URL)
 
-class RealDebridDownloader(DownloaderBase):
-    """Main Real-Debrid downloader class implementing DownloaderBase"""
+class TorBoxDownloader(DownloaderBase):
+    """Main TorBox downloader class implementing DownloaderBase"""
 
     def __init__(self):
-        self.key = "realdebrid"
-        self.settings = settings_manager.settings.downloaders.real_debrid
+        self.key = "torbox"
+        self.settings = settings_manager.settings.downloaders.torbox
         self.api = None
         self.initialized = self.validate()
 
     def validate(self) -> bool:
         """
-        Validate Real-Debrid settings and premium status
+        Validate TorBox settings and premium status
         Required by DownloaderBase
         """
         if not self._validate_settings():
             return False
 
-        self.api = RealDebridAPI(
+        self.api = TorBoxAPI(
             api_key=self.settings.api_key,
             proxy_url=self.PROXY_URL if self.PROXY_URL else None
         )
@@ -81,62 +85,73 @@ class RealDebridDownloader(DownloaderBase):
         if not self.settings.enabled:
             return False
         if not self.settings.api_key:
-            logger.warning("Real-Debrid API key is not set")
+            logger.warning("TorBox API key is not set")
             return False
         return True
 
     def _validate_premium(self) -> bool:
         """Validate premium status"""
         try:
-            user_info = self.api.request_handler.execute(HttpMethod.GET, "user")
-            if not user_info.get("premium"):
+            user_info = self.api.request_handler.execute(HttpMethod.GET, "user/me")
+            if not user_info.get("plan", 0) > 0:
                 logger.error("Premium membership required")
                 return False
 
-            expiration = datetime.fromisoformat(
-                user_info["expiration"].replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            expiration = datetime.strptime(user_info["premium_expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=None)
             logger.info(premium_days_left(expiration))
             return True
         except Exception as e:
             logger.error(f"Failed to validate premium status: {e}")
             return False
+        
+    def select_files(self, torrent_id: str, _: List[str] = None) -> None:
+        pass
 
     def get_instant_availability(self, infohash: str, item_type: str) -> Optional[TorrentContainer]:
         """
         Get instant availability for a single infohash.
-        Creates a makeshift availability check since Real-Debrid no longer supports instant availability.
         """
-        container: Optional[TorrentContainer] = None
-        torrent_id = None
-
         try:
-            torrent_id = self.add_torrent(infohash)
-            container = self._process_torrent(torrent_id, infohash, item_type)
-        except InvalidDebridFileException as e:
-            logger.debug(f"{infohash}: {e}")
-        except exceptions.ReadTimeout as e:
-            logger.debug(f"Failed to get instant availability for {infohash}: [ReadTimeout] {e}")
-        except Exception as e:
-            if len(e.args) > 0:
-                if " 503 " in e.args[0] or "Infringing" in e.args[0]:
-                    logger.debug(f"Failed to get instant availability for {infohash}: [503] Infringing Torrent or Service Unavailable")
-                elif " 429 " in e.args[0] or "Rate Limit Exceeded" in e.args[0]:
-                    logger.debug(f"Failed to get instant availability for {infohash}: [429] Rate Limit Exceeded")
-                elif " 404 " in e.args[0] or "Torrent Not Found" in e.args[0]:
-                    logger.debug(f"Failed to get instant availability for {infohash}: [404] Torrent Not Found or Service Unavailable")
-                elif " 400 " in e.args[0] or "Torrent file is not valid" in e.args[0]:
-                    logger.debug(f"Failed to get instant availability for {infohash}: [400] Torrent file is not valid")
-            else:
-                logger.error(f"Failed to get instant availability for {infohash}: {e}")
-        finally:
-            if torrent_id is not None:
-                try:
-                    self.delete_torrent(torrent_id)
-                except Exception as e:
-                    logger.error(f"Failed to delete torrent {torrent_id}: {e}")
+            response = self.api.request_handler.execute(
+                HttpMethod.GET,
+                f"torrents/checkcached?hash={infohash}&format=object&list_files=true",
+            )
+            if not response:
+                logger.debug(f"Torrent {infohash} is not cached")
+                return None
+            
+            response_data = response.get(infohash, {})
+            if not response_data:
+                logger.debug(f"Torrent {infohash} is not cached")
+                return None
+            
 
-        return container
+            torrent_files = []
+            
+            files = response_data.get("files", [])
+            for file_id, file in enumerate(files):
+                try:
+                    debrid_file = DebridFile.create(
+                        path=file["name"],
+                        filename=file["name"].split("/")[-1],
+                        filesize_bytes=file["size"],
+                        filetype=item_type,
+                        file_id=file_id
+                    )
+                    if isinstance(debrid_file, DebridFile):
+                        torrent_files.append(debrid_file)
+                except InvalidDebridFileException as e:
+                    logger.debug(f"{infohash}: {e}")
+                    continue
+
+            if not torrent_files:
+                logger.debug(f"No valid files found in cached torrent {infohash}")
+                return None
+            
+            return TorrentContainer(infohash=infohash, files=torrent_files)
+        except Exception as e:
+            logger.error(f"Failed to get instant availability for {infohash}: {e}")
+            return None
 
     def _process_torrent(self, torrent_id: str, infohash: str, item_type: str) -> Optional[TorrentContainer]:
         """Process a single torrent and return a TorrentContainer if valid."""
@@ -151,20 +166,7 @@ class RealDebridDownloader(DownloaderBase):
             logger.debug(f"No files found in torrent {torrent_id} with infohash {infohash}")
             return None
 
-        if torrent_info.status == "waiting_files_selection":
-            video_file_ids = [
-                file_id for file_id, file_info in torrent_info.files.items()
-                if file_info["filename"].endswith(tuple(ext.lower() for ext in VALID_VIDEO_EXTENSIONS))
-            ]
-
-            if not video_file_ids:
-                logger.debug(f"No video files found in torrent {torrent_id} with infohash {infohash}")
-                return None
-
-            self.select_files(torrent_id, video_file_ids)
-            torrent_info = self.get_torrent_info(torrent_id)
-
-        if torrent_info.status == "downloaded":
+        if torrent_info.status:
             for file_id, file_info in torrent_info.files.items():
                 try:
                     debrid_file = DebridFile.create(
@@ -189,12 +191,8 @@ class RealDebridDownloader(DownloaderBase):
 
         if torrent_info.status in ("downloading", "queued"):
             # TODO: add support for downloading torrents
-            logger.debug(f"Skipping torrent {torrent_id} with infohash {infohash} because it is downloading. Torrent status on Real-Debrid: {torrent_info.status}")
+            logger.debug(f"Skipping torrent {torrent_id} with infohash {infohash} because it is downloading. Torrent status on TorBox: {torrent_info.status}")
             return None
-
-        # if torrent_info.status in ("magnet_error", "error", "virus", "dead", "compressing", "uploading"):
-        #     logger.debug(f"Torrent {torrent_id} with infohash {infohash} is invalid. Torrent status on Real-Debrid: {torrent_info.status}")
-        #     return None
 
         logger.debug(f"Torrent {torrent_id} with infohash {infohash} is invalid. Torrent status on Real-Debrid: {torrent_info.status}")
         return None
@@ -205,63 +203,50 @@ class RealDebridDownloader(DownloaderBase):
             magnet = f"magnet:?xt=urn:btih:{infohash}"
             response = self.api.request_handler.execute(
                 HttpMethod.POST,
-                "torrents/addMagnet",
+                "torrents/createtorrent",
                 data={"magnet": magnet.lower()}
             )
-            return response["id"]
+            return str(response["torrent_id"]) # must be a string
         except Exception as e:
             if len(e.args) > 0:
                 if " 503 " in e.args[0]:
                     logger.debug(f"Failed to add torrent {infohash}: [503] Infringing Torrent or Service Unavailable")
-                    raise RealDebridError("Infringing Torrent or Service Unavailable")
+                    raise TorBoxError("Infringing Torrent or Service Unavailable")
                 elif " 429 " in e.args[0]:
                     logger.debug(f"Failed to add torrent {infohash}: [429] Rate Limit Exceeded")
-                    raise RealDebridError("Rate Limit Exceeded")
+                    raise TorBoxError("Rate Limit Exceeded")
                 elif " 404 " in e.args[0]:
                     logger.debug(f"Failed to add torrent {infohash}: [404] Torrent Not Found or Service Unavailable")
-                    raise RealDebridError("Torrent Not Found or Service Unavailable")
+                    raise TorBoxError("Torrent Not Found or Service Unavailable")
                 elif " 400 " in e.args[0]:
                     logger.debug(f"Failed to add torrent {infohash}: [400] Torrent file is not valid. Magnet: {magnet}")
-                    raise RealDebridError("Torrent file is not valid")
+                    raise TorBoxError("Torrent file is not valid")
             else:
                 logger.debug(f"Failed to add torrent {infohash}: {e}")
             
-            raise RealDebridError(f"Failed to add torrent {infohash}: {e}")
-
-    def select_files(self, torrent_id: str, ids: List[int] = None) -> None:
-        """Select files from a torrent"""
-        try:
-            selection = ",".join(str(file_id) for file_id in ids) if ids else "all"
-            self.api.request_handler.execute(
-                HttpMethod.POST,
-                f"torrents/selectFiles/{torrent_id}",
-                data={"files": selection},
-                timeout=25
-            )
-        except Exception as e:
-            logger.error(f"Failed to select files for torrent {torrent_id}: {e}")
-            raise
+            raise TorBoxError(f"Failed to add torrent {infohash}: {e}")
 
     def get_torrent_info(self, torrent_id: str) -> TorrentInfo:
         """Get information about a torrent"""
         try:
-            data = self.api.request_handler.execute(HttpMethod.GET, f"torrents/info/{torrent_id}")
+            data = self.api.request_handler.execute(HttpMethod.GET, f"torrents/mylist?id={torrent_id}")
             files = {
                 file["id"]: {
-                    "path": file["path"], # we're gonna need this to weed out the junk files
-                    "filename": file["path"].split("/")[-1],
-                    "bytes": file["bytes"],
-                    "selected": file["selected"]
+                    "path": file["name"], # we're gonna need this to weed out the junk files
+                    "filename": file["short_name"],
+                    "bytes": file["size"],
+                    "selected": True
                 } for file in data["files"]
             }
             return TorrentInfo(
                 id=data["id"],
-                name=data["filename"],
-                status=data["status"],
+                name=data["name"],
+                status=data["download_state"],
+                cached=data["cached"],
                 infohash=data["hash"],
-                bytes=data["bytes"],
-                created_at=data["added"],
-                alternative_filename=data.get("original_filename", None),
+                bytes=data["size"],
+                created_at=data["created_at"],
+                alternative_filename=None,
                 progress=data.get("progress", None),
                 files=files,
             )
@@ -272,7 +257,10 @@ class RealDebridDownloader(DownloaderBase):
     def delete_torrent(self, torrent_id: str) -> None:
         """Delete a torrent"""
         try:
-            self.api.request_handler.execute(HttpMethod.DELETE, f"torrents/delete/{torrent_id}")
+            self.api.request_handler.execute(HttpMethod.POST, "torrents/controltorrent", data={
+                "id": torrent_id,
+                "operation": "delete",
+            })
         except Exception as e:
             logger.error(f"Failed to delete torrent {torrent_id}: {e}")
             raise

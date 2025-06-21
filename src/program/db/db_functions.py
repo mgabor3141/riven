@@ -1,15 +1,13 @@
-from dataclasses import dataclass
-from datetime import datetime
 import os
 import shutil
-from threading import Event
-from typing import TYPE_CHECKING, List, Optional, Union
+import alembic
 
 from loguru import logger
-from sqlalchemy import delete, insert, inspect, or_, select, text
-from sqlalchemy.orm import Session, selectinload, aliased
-
-import alembic
+from threading import Event
+from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timedelta
+from sqlalchemy import delete, func, insert, inspect, or_, select, text
+from sqlalchemy.orm import Session, selectinload
 
 from program.media.stream import Stream, StreamBlacklistRelation, StreamRelation
 from program.services.libraries.symlink import fix_broken_symlinks
@@ -22,181 +20,6 @@ from .db import db
 if TYPE_CHECKING:
     from program.media.item import MediaItem
 
-
-@dataclass
-class ItemFilter:
-    """Filter configuration for MediaItem queries in the database."""
-    id: Optional[Union[str, List[str]]] = None
-    type: Optional[Union[str, List[str]]] = None
-    imdb_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    title: Optional[str] = None
-
-    states: Optional[List[States]] = None
-    is_released: Optional[bool] = None
-    is_anime: Optional[bool] = None
-    is_symlinked: Optional[bool] = None
-    is_scraped: Optional[bool] = None
-
-    requested_after: Optional[datetime] = None
-    requested_before: Optional[datetime] = None
-    aired_after: Optional[datetime] = None
-    aired_before: Optional[datetime] = None
-    scraped_after: Optional[datetime] = None
-    scraped_before: Optional[datetime] = None
-
-    year: Optional[Union[int, List[int]]] = None
-    country: Optional[str] = None
-    language: Optional[str] = None
-    requested_by: Optional[str] = None
-
-    has_file: Optional[bool] = None
-    has_folder: Optional[bool] = None
-    has_symlink: Optional[bool] = None
-    filepath: Optional[str] = None
-    folder: Optional[str] = None
-    symlink_path: Optional[str] = None
-
-    season_number: Optional[int] = None
-    episode_number: Optional[int] = None
-
-    failed_attempts: Optional[int] = None
-    scraped_times: Optional[int] = None
-    symlinked_times: Optional[int] = None
-
-    load_streams: bool = False
-    load_blacklisted_streams: bool = False
-    load_subtitles: bool = False
-    load_children: bool = True
-    
-    def __post_init__(self):
-        # Convert single values to lists where appropriate
-        if self.type is None:
-            self.type = ["movie", "show"]
-        if isinstance(self.type, str):
-            self.type = [self.type]
-        if isinstance(self.id, str):
-            self.id = [self.id]
-        if isinstance(self.year, int):
-            self.year = [self.year]
-
-def get_items_from_filter(
-    session: Session = None,
-    filter: ItemFilter = None,
-    limit: int = None,
-) -> List["MediaItem"]:
-    """Get MediaItems based on filter criteria."""
-    from program.media.item import Episode, MediaItem, Season, Show
-    
-    _session = session if session else db.Session()
-    stmt = _session.query(MediaItem)
-
-    if filter.id:
-        stmt = stmt.where(MediaItem.id.in_(filter.id))
-    else:
-        if filter.season_number and not filter.episode_number:
-            stmt = stmt.where(MediaItem.type == "season")
-        elif filter.season_number and filter.episode_number:
-            stmt = stmt.where(MediaItem.type == "episode")
-        else:
-            stmt = stmt.where(MediaItem.type.in_(filter.type))
-    if filter.tvdb_id:
-        stmt = stmt.where(MediaItem.tvdb_id == filter.tvdb_id)
-    if filter.tmdb_id:
-        stmt = stmt.where(MediaItem.tmdb_id == filter.tmdb_id)
-    if filter.title:
-        stmt = stmt.where(MediaItem.title.ilike(f"%{filter.title}%"))
-
-    if filter.states:
-        stmt = stmt.where(MediaItem.last_state.in_(filter.states))
-    if filter.is_anime is not None:
-        stmt = stmt.where(MediaItem.is_anime == filter.is_anime)
-    if filter.is_symlinked is not None:
-        stmt = stmt.where(MediaItem.symlinked == filter.is_symlinked)
-
-    if filter.requested_after:
-        stmt = stmt.where(MediaItem.requested_at >= filter.requested_after)
-    if filter.requested_before:
-        stmt = stmt.where(MediaItem.requested_at <= filter.requested_before)
-    if filter.aired_after:
-        stmt = stmt.where(MediaItem.aired_at >= filter.aired_after)
-    if filter.aired_before:
-        stmt = stmt.where(MediaItem.aired_at <= filter.aired_before)
-    if filter.scraped_after:
-        stmt = stmt.where(MediaItem.scraped_at >= filter.scraped_after)
-    if filter.scraped_before:
-        stmt = stmt.where(MediaItem.scraped_at <= filter.scraped_before)
-
-    if filter.year:
-        stmt = stmt.where(MediaItem.year.in_(filter.year))
-    if filter.country:
-        stmt = stmt.where(MediaItem.country == filter.country)
-    if filter.language:
-        stmt = stmt.where(MediaItem.language == filter.language)
-    if filter.requested_by:
-        stmt = stmt.where(MediaItem.requested_by == filter.requested_by)
-
-    if filter.has_file is not None:
-        if filter.has_file:
-            stmt = stmt.where(MediaItem.file is None)
-        else:
-            stmt = stmt.where(MediaItem.file is not None)
-    if filter.has_folder is not None:
-        if filter.has_folder:
-            stmt = stmt.where(MediaItem.folder is not None)
-        else:
-            stmt = stmt.where(MediaItem.folder is None)
-    if filter.filepath:
-        stmt = stmt.where(MediaItem.file == filter.filepath)
-    if filter.folder:
-        stmt = stmt.where(MediaItem.folder == filter.folder)
-    if filter.symlink_path:
-        stmt = stmt.where(MediaItem.symlink_path == filter.symlink_path)
-
-    if filter.failed_attempts is not None:
-        stmt = stmt.where(MediaItem.failed_attempts == filter.failed_attempts)
-    if filter.scraped_times is not None:
-        stmt = stmt.where(MediaItem.scraped_times == filter.scraped_times)
-    if filter.symlinked_times is not None:
-        stmt = stmt.where(MediaItem.symlinked_times == filter.symlinked_times)
-
-    if filter.season_number is not None:
-        season_alias = aliased(Season)
-        stmt = (
-            stmt.join(season_alias, Season.id == Episode.parent_id)
-            .where(season_alias.number == filter.season_number)
-        )
-    
-    if filter.episode_number is not None:
-        stmt = stmt.where(Episode.number == filter.episode_number)
-
-    options = []
-    if filter.load_streams:
-        options.extend([
-            selectinload(MediaItem.streams),
-        ])
-    if filter.load_blacklisted_streams:
-        options.extend([
-            selectinload(MediaItem.blacklisted_streams),
-        ])
-    if filter.load_subtitles:
-        options.extend([
-            selectinload(MediaItem.subtitles),
-        ])
-    if filter.load_children:
-        options.extend([
-            selectinload(Show.seasons)
-            .selectinload(Season.episodes)
-        ])
-    
-    if options:
-        stmt = stmt.options(*options)
-    
-    with _session:
-        if limit:
-            stmt = stmt.limit(limit)
-        return _session.execute(stmt).unique().scalars().all()
 
 def get_item_by_id(item_id: str, item_types: list[str] = None, session: Session = None) -> "MediaItem":
     """Get a MediaItem by its ID."""
@@ -468,6 +291,136 @@ def get_item_ids(session: Session, item_id: str) -> tuple[str, list[str]]:
         related_ids.extend(episode_ids)
 
     return item_id, related_ids
+
+def get_item_by_symlink_path(filepath: str, session: Session = None) -> list["MediaItem"]:
+    """Get a list of MediaItems by their symlink path."""
+    from program.media.item import MediaItem
+    _session = session if session else db.Session()
+
+    with _session:
+        items = _session.execute(
+            select(MediaItem).where(MediaItem.symlink_path == filepath)
+        ).unique().scalars().all()
+        for item in items:
+            _session.expunge(item)
+        return items
+
+def get_item_by_imdb_and_episode(imdb_id: str, season_number: Optional[int] = None, episode_number: Optional[int] = None, session: Session = None) -> list["MediaItem"]:
+    """Get a MediaItem by its IMDb ID and optionally season and episode numbers."""
+    from program.media.item import Episode, Movie, Season, Show
+
+    _session = session if session else db.Session()
+
+    with _session:
+        if season_number is not None and episode_number is not None:
+            # Look for an episode
+            items = _session.execute(
+                select(Episode).options(
+                    selectinload(Episode.parent).selectinload(Season.parent)
+                ).where(
+                    Episode.parent.has(Season.parent.has(Show.imdb_id == imdb_id)),
+                    Episode.parent.has(Season.number == season_number),
+                    Episode.number == episode_number
+                )
+            ).scalars().all()
+        else:
+            # Look for a movie
+            items = _session.execute(
+                select(Movie).where(Movie.imdb_id == imdb_id)
+            ).scalars().all()
+
+        for item in items:
+            _session.expunge(item)
+        return items
+
+def retry_library(session) -> list[str]:
+    """Retry items that failed to download."""
+    from program.media.item import MediaItem
+    session = session if session else db.Session()
+
+    count = session.execute(
+        select(func.count(MediaItem.id))
+        .where(MediaItem.last_state.not_in([States.Completed, States.Unreleased, States.Paused, States.Failed]))
+        .where(MediaItem.type.in_(["movie", "show"]))
+    ).scalar_one()
+
+    if count == 0:
+        return []
+
+    logger.log("PROGRAM", f"Starting retry process for {count} items.")
+
+    items_query = (
+        select(MediaItem.id)
+        .where(MediaItem.last_state.not_in([States.Completed, States.Unreleased, States.Paused, States.Failed]))
+        .where(MediaItem.type.in_(["movie", "show"]))
+        .order_by(MediaItem.requested_at.desc())
+    )
+
+    result = session.execute(items_query)
+    return [item_id for item_id in result.scalars()]
+
+def update_ongoing(session) -> list[tuple[str, str, str]]:
+    """Update state for ongoing and unreleased items."""
+    from program.media.item import MediaItem
+    session = session if session else db.Session()
+
+    item_ids = session.execute(
+        select(MediaItem.id)
+        .where(MediaItem.type.in_(["movie", "episode"]))
+        .where(MediaItem.last_state.in_([States.Ongoing, States.Unreleased]))
+    ).scalars().all()
+
+    if not item_ids:
+        logger.debug("No ongoing or unreleased items to update.")
+        return []
+
+    logger.debug(f"Updating state for {len(item_ids)} ongoing and unreleased items.")
+
+    updated_items = []
+    for item_id in item_ids:
+        try:
+            item = session.execute(select(MediaItem).filter_by(id=item_id)).unique().scalar_one_or_none()
+            if item:
+                previous_state, new_state = item.store_state()
+                if previous_state != new_state:
+                    updated_items.append((item_id, previous_state.name, new_state.name))
+                    session.merge(item)
+                    session.commit()
+        except Exception as e:
+            logger.error(f"Failed to update state for item with ID {item_id}: {e}")
+
+    return updated_items
+
+def create_calendar(session: Session) -> dict:
+    """Create a calendar of all the items in the library."""
+    from program.media.item import MediaItem, Show, Season
+    session = session if session else db.Session()
+
+    results = session.execute(
+        select(MediaItem)
+        .options(selectinload(Show.seasons).selectinload(Season.episodes))
+        .where(MediaItem.type.in_(["movie", "episode"]))
+        .where(MediaItem.last_state != States.Completed)
+        .where(MediaItem.aired_at.is_not(None))
+        .where(MediaItem.aired_at >= datetime.now() - timedelta(days=1))
+    ).unique().scalars().all()
+
+    calendar = {}
+    for item in results:
+        calendar[item.id] = {}
+        calendar[item.id]["trakt_id"] = item.trakt_id
+        calendar[item.id]["imdb_id"] = item.imdb_id
+        calendar[item.id]["tvdb_id"] = item.tvdb_id
+        calendar[item.id]["tmdb_id"] = item.tmdb_id
+        calendar[item.id]["aired_at"] = item.aired_at
+        if item.type == "episode":
+            calendar[item.id]["title"] = item.parent.parent.title
+            calendar[item.id]["season"] = item.parent.number
+            calendar[item.id]["episode"] = item.number
+        else:
+            calendar[item.id]["title"] = item.title
+
+    return calendar
 
 def run_thread_with_db_item(fn, service, program, event: Event, cancellation_event: Event) -> Optional[str]:
     """Run a thread with a MediaItem."""

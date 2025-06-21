@@ -16,25 +16,19 @@
 </div>
 
 <div align="center">
-  <p>Plex torrent streaming through Real Debrid and 3rd party services like Overseerr, Mdblist, etc.</p>
+  <p>Plex torrent streaming through Debrid and 3rd party services like Overseerr, Mdblist, etc.</p>
 </div>
 
 Services currently supported:
 
-| Service            | Supported |
-| ------------------ | --------- |
-| Real Debrid        | ✅        |
-| Plex               | ✅        |
-| Overseerr          | ✅        |
-| Mdblist            | ✅        |
-| Trakt              | ✅        |
-| Jackett            | ✅        |
-| Plex Watchlist RSS | ✅        |
-| Torrentio          | ✅        |
-| Orionoid           | ✅        |
-| Listrr             | ✅        |
+| Type              | Supported                                                                         |
+| ----------------- | --------------------------------------------------------------------------------- |
+| Debrid services   | Real Debrid, All Debrid, TorBox                                                   |
+| Content services  | Plex Watchlist, Overseerr, Mdblist, Listrr, Trakt                                           |
+| Scraping services | Comet, Jackett, Torrentio, Orionoid, Knightcrawler, Mediafusion, Prowlarr, Zilean |
+| Media servers     | Plex, Jellyfin, Emby                                                              |
 
-| and more to come!
+and more to come!
 
 Check out out [Project Board](https://github.com/users/dreulavelle/projects/2) to stay informed!
 
@@ -78,18 +72,17 @@ We are constantly adding features and improvements as we go along and squashing 
 
 > [!IMPORTANT]
 > **ElfHosted ❤️ Riven 100%**
-> 
 > [Riven](https://elfhosted.com/app/riven/) is an "Elf-icial" app in the [ElfHosted app catalogue](https://elfhosted.com/apps/) - A whopping :heart_eyes_cat::heart_eyes_cat: 100% :heart_eyes_cat::heart_eyes_cat: of your subscription goes directly to Riven developers, who can usually be found in the [#elf-riven](https://discord.com/channels/396055506072109067/1253110932062601276) channel in the [ElfHosted Discord Server](https://discord.elfhosted.com).
 
 Curious how it works? Here's an [explainer video](https://www.youtube.com/watch?v=ZHZAEhLuJqk)!
 
-> [!TIP] 
+> [!TIP]
 > **ElfHosted "Infinite Streaming" bundles**
-> 
 > Riven is pre-packaged with Plex, Zurg, and symlinks, and ready-to-go, in these convenient bundles:
-> * [Starter Kit](https://store.elfhosted.com/product/plex-riven-infinite-streaming-starter-kit) (*quick and easy setup*)
-> * [Hobbit Bundle](https://store.elfhosted.com/product/hobbit-riven-real-debrid-infinite-streaming-bundle) (*12.5% dedicated node, with extras*)
-> * [Ranger Bundle](https://store.elfhosted.com/product/plex-riven-infinite-streaming-plus-bundle) (*25% dedicated node, with extras*)
+>
+> -   [Starter Kit](https://store.elfhosted.com/product/plex-riven-infinite-streaming-starter-kit) (_quick and easy setup_)
+> -   [Hobbit Bundle](https://store.elfhosted.com/product/hobbit-riven-real-debrid-infinite-streaming-bundle) (_12.5% dedicated node, with extras_)
+> -   [Ranger Bundle](https://store.elfhosted.com/product/plex-riven-infinite-streaming-plus-bundle) (_25% dedicated node, with extras_)
 
 ## Self Hosted
 

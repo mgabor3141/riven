@@ -43,6 +43,7 @@ class TraktIndexer:
                             for episodeb in seasonb.episodes:
                                 if episodea.number == episodeb.number:  # Check if episodes match
                                     self.copy_attributes(episodea, episodeb)
+                                    episodeb.set("is_anime", is_anime)
                         seasonb.set("is_anime", is_anime)
             itemb.set("is_anime", is_anime)
         elif itemb.type == "movie":
@@ -85,7 +86,7 @@ class TraktIndexer:
         item.indexed_at = datetime.now()
 
         if log_msg: # used for mapping symlinks to database, need to hide this log message
-            logger.debug(f"Indexed IMDb id ({in_item.imdb_id}) as {item.type.title()}: {item.log_string}")
+            logger.info(f"Indexed IMDb id ({in_item.imdb_id}) as {item.type.title()}: {item.log_string}")
         yield item
 
     @staticmethod

@@ -1,11 +1,11 @@
 """MediaItem class"""
+from PTT import parse_title
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Self
+from typing import List, Optional, Self
 
 import sqlalchemy
 from loguru import logger
-from RTN import parse
 from sqlalchemy import Index
 from sqlalchemy.orm import Mapped, mapped_column, object_session, relationship
 
@@ -22,9 +22,11 @@ class MediaItem(db.Model):
     """MediaItem class"""
     __tablename__ = "MediaItem"
     id: Mapped[str] = mapped_column(sqlalchemy.String, primary_key=True)
+    trakt_id: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     imdb_id: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     tvdb_id: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     tmdb_id: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     number: Mapped[Optional[int]] = mapped_column(sqlalchemy.Integer, nullable=True)
     type: Mapped[str] = mapped_column(sqlalchemy.String, nullable=False)
     requested_at: Mapped[Optional[datetime]] = mapped_column(sqlalchemy.DateTime, default=datetime.now())
@@ -45,8 +47,6 @@ class MediaItem(db.Model):
     alternative_folder: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     aliases: Mapped[Optional[dict]] = mapped_column(sqlalchemy.JSON, default={})
     is_anime: Mapped[Optional[bool]] = mapped_column(sqlalchemy.Boolean, default=False)
-    title: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
-
     network: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     country: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
     language: Mapped[Optional[str]] = mapped_column(sqlalchemy.String, nullable=True)
@@ -109,6 +109,7 @@ class MediaItem(db.Model):
 
         # Media related
         self.title = item.get("title")
+        self.trakt_id = item.get("trakt_id")
         self.imdb_id =  item.get("imdb_id")
         if self.imdb_id:
             self.imdb_link = f"https://www.imdb.com/title/{self.imdb_id}/"
@@ -159,11 +160,28 @@ class MediaItem(db.Model):
         return stream in self.blacklisted_streams
 
     def blacklist_active_stream(self):
-        stream = next((stream for stream in self.streams if stream.infohash == self.active_stream.get("infohash", None)), None)
-        if stream:
-            self.blacklist_stream(stream)
-        else:
+        if not self.active_stream:
             logger.debug(f"No active stream for {self.log_string}, will not blacklist")
+            return
+
+        def find_and_blacklist_stream(streams):
+            stream = next((s for s in streams if s.infohash == self.active_stream.get("infohash")), None)
+            if stream:
+                self.blacklist_stream(stream)
+                logger.debug(f"Blacklisted stream {stream.infohash} for {self.log_string}")
+                return True
+            return False
+
+        if find_and_blacklist_stream(self.streams):
+            return
+
+        if self.type == "episode":
+            if self.parent and find_and_blacklist_stream(self.parent.streams):
+                return
+            if self.parent and self.parent.parent and find_and_blacklist_stream(self.parent.parent.streams):
+                return
+
+        logger.debug(f"Unable to find stream from item hierarchy for {self.log_string}, will not blacklist")
 
     def blacklist_stream(self, stream: Stream):
         value = blacklist_stream(self, stream)
@@ -223,8 +241,8 @@ class MediaItem(db.Model):
             try:
                 session.refresh(self, attribute_names=["blacklisted_streams"])
                 return (len(self.streams) > 0 and any(stream not in self.blacklisted_streams for stream in self.streams))
-            except Exception as e:
-                logger.exception(f"Error in is_scraped() for {self.log_string}: {str(e)}")
+            except:
+                ...
         return False
 
     def to_dict(self):
@@ -233,6 +251,7 @@ class MediaItem(db.Model):
             "id": str(self.id),
             "title": self.title,
             "type": self.__class__.__name__,
+            "trakt_id": self.trakt_id if hasattr(self, "trakt_id") else None,
             "imdb_id": self.imdb_id if hasattr(self, "imdb_id") else None,
             "tvdb_id": self.tvdb_id if hasattr(self, "tvdb_id") else None,
             "tmdb_id": self.tmdb_id if hasattr(self, "tmdb_id") else None,
@@ -392,6 +411,17 @@ class MediaItem(db.Model):
 
         logger.debug(f"Item {self.log_string} has been reset")
 
+    def soft_reset(self):
+        """Soft reset item attributes."""
+        self.blacklist_active_stream()
+        self.set("file", None)
+        self.set("folder", None)
+        self.set("alternative_folder", None)
+        self.set("active_stream", {})
+        self.set("symlinked", False)
+        self.set("symlinked_at", None)
+        self.set("symlinked_times", 0)
+
     @property
     def log_string(self):
         return self.title or self.id
@@ -513,7 +543,7 @@ class Show(MediaItem):
             return States.Requested
         return States.Unknown
 
-    def store_state(self, given_state: States =None) -> None:
+    def store_state(self, given_state: States = None) -> None:
         for season in self.seasons:
             season.store_state(given_state)
         super().store_state(given_state)
@@ -571,6 +601,26 @@ class Show(MediaItem):
             for episode in season.episodes:
                 propagate(episode, self)
 
+    def get_episode(self, episode_number: int, season_number: int = None) -> Optional["Episode"]:
+        """Get the absolute episode number based on season and episode."""
+        if not episode_number or episode_number == 0:
+            return None
+
+        if season_number is not None:
+            season = next((s for s in self.seasons if s.number == season_number), None)
+            if season:
+                episode = next((e for e in season.episodes if e.number == episode_number), None)
+                if episode:
+                    return episode
+
+        episode_count = 0
+        for season in self.seasons:
+            for episode in season.episodes:
+                episode_count += 1
+                if episode_count == episode_number:
+                    return episode
+
+        return None
 
 class Season(MediaItem):
     """Season class"""
@@ -720,7 +770,7 @@ class Episode(MediaItem):
         if not self.file or not isinstance(self.file, str):
             raise ValueError("The file attribute must be a non-empty string.")
         # return list of episodes
-        return parse(self.file).episodes
+        return parse_title(self.file)["episodes"]
 
     @property
     def log_string(self):

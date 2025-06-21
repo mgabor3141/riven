@@ -1,9 +1,10 @@
 import asyncio
 import re
 from datetime import datetime, timedelta
-from typing import Dict, List, Literal, Optional, TypeAlias, Union
+from typing import Any, Dict, Literal, Optional, TypeAlias, Union
 from uuid import uuid4
 
+from PTT import parse_title
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel, RootModel
@@ -12,7 +13,7 @@ from sqlalchemy import select
 
 from program.db import db_functions
 from program.db.db import db
-from program.media.item import Episode, MediaItem
+from program.media.item import MediaItem
 from program.media.stream import Stream as ItemStream
 from program.services.downloaders import Downloader
 from program.services.indexers.trakt import TraktIndexer
@@ -29,7 +30,7 @@ class Stream(BaseModel):
     parsed_data: ParsedData
     rank: int
     lev_ratio: float
-    is_cached: bool
+    is_cached: bool = False
 
 class ScrapeItemResponse(BaseModel):
     message: str
@@ -202,7 +203,6 @@ def scrape_item(request: Request, id: str) -> ScrapeItemResponse:
     if services := request.app.program.services:
         indexer = services[TraktIndexer]
         scraper = services[Scraping]
-        downloader = services[Downloader]
     else:
         raise HTTPException(status_code=412, detail="Scraping services not initialized")
 
@@ -221,11 +221,11 @@ def scrape_item(request: Request, id: str) -> ScrapeItemResponse:
                 .unique()
                 .scalar_one_or_none()
             )
+
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+
         streams: Dict[str, Stream] = scraper.scrape(item)
-        for stream in streams.values():
-            # container = downloader.get_instant_availability(stream.infohash, item.type)
-            # stream.is_cached = bool(container and container.cached)
-            stream.is_cached = False
         log_string = item.log_string
 
     return {
@@ -353,6 +353,8 @@ async def manual_update_attributes(request: Request, session_id, data: Union[Deb
         if str(session.item_id).startswith("tt") and not db_functions.get_item_by_external_id(imdb_id=session.item_id) and not db_functions.get_item_by_id(session.item_id):
             prepared_item = MediaItem({"imdb_id": session.item_id})
             item = next(TraktIndexer().run(prepared_item))
+            if not item:
+                raise HTTPException(status_code=404, detail="Unable to index item")
             db_session.merge(item)
             db_session.commit()
         else:
@@ -361,38 +363,47 @@ async def manual_update_attributes(request: Request, session_id, data: Union[Deb
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
 
-        item_ids_to_submit = []
+        item = db_session.merge(item)
+        item_ids_to_submit = set()
 
-        if item.type == "movie":
+        def update_item(item: MediaItem, data: DebridFile, session: ScrapingSession):
             request.app.program.em.cancel_job(item.id)
             item.reset()
             item.file = data.filename
             item.folder = data.filename
             item.alternative_folder = session.torrent_info.alternative_filename
             item.active_stream = {"infohash": session.magnet, "id": session.torrent_info.id}
-            torrent = rtn.rank(session.magnet, session.magnet)
+            torrent = rtn.rank(session.torrent_info.name, session.magnet)
             item.streams.append(ItemStream(torrent))
-            item_ids_to_submit.append(item.id)
+            item_ids_to_submit.add(item.id)
+
+        if item.type == "movie":
+            update_item(item, data, session)
+
         else:
-            request.app.program.em.cancel_job(item.id)
-            await asyncio.sleep(0.2)
-            for season in item.seasons:
-                request.app.program.em.cancel_job(season.id)
-                await asyncio.sleep(0.2)
-            for season, episodes in data.root.items():
-                for episode, episode_data in episodes.items():
-                    item_episode: Episode = next((_episode for _season in item.seasons if _season.number == season for _episode in _season.episodes if _episode.number == episode), None)
-                    if item_episode:
-                        request.app.program.em.cancel_job(item_episode.id)
-                        await asyncio.sleep(0.2)
-                        item_episode.reset()
-                        item_episode.file = episode_data.filename
-                        item_episode.folder = episode_data.filename
-                        item_episode.alternative_folder = session.torrent_info.alternative_filename
-                        item_episode.active_stream = {"infohash": session.magnet, "id": session.torrent_info.id}
-                        torrent = rtn.rank(session.magnet, session.magnet)
-                        item_episode.streams.append(ItemStream(torrent))
-                        item_ids_to_submit.append(item_episode.id)
+            for season_number, episodes in data.root.items():
+                for episode_number, episode_data in episodes.items():
+                    if item.type == "show":
+                        if (episode := item.get_episode(episode_number, season_number)):
+                            update_item(episode, episode_data, session)
+                        else:
+                            logger.error(f"Failed to find episode {episode_number} for season {season_number} for {item.log_string}")
+                            continue
+                    elif item.type == "season":
+                        if (episode := item.parent.get_episode(episode_number, season_number)):
+                            update_item(episode, episode_data, session)
+                        else:
+                            logger.error(f"Failed to find season {season_number} for {item.log_string}")
+                            continue
+                    elif item.type == "episode":
+                        if season_number != item.parent.number and episode_number != item.number:
+                            continue
+                        update_item(item, episode_data, session)
+                        break
+                    else:
+                        logger.error(f"Failed to find item type for {item.log_string}")
+                        continue
+
         item.store_state()
         log_string = item.log_string
         db_session.merge(item)
@@ -403,7 +414,7 @@ async def manual_update_attributes(request: Request, session_id, data: Union[Deb
 
     return {"message": f"Updated given data to {log_string}"}
 
-@router.post("/scrape/abort_session/{session_id}")
+@router.post("/scrape/abort_session/{session_id}", summary="Abort a manual scraping session", operation_id="abort_manual_session")
 async def abort_manual_session(
     _: Request,
     background_tasks: BackgroundTasks,
@@ -432,3 +443,22 @@ async def complete_manual_session(_: Request, session_id: str) -> SessionRespons
 
     session_manager.complete_session(session_id)
     return {"message": f"Completed session {session_id}"}
+
+class ParseTorrentTitleResponse(BaseModel):
+    message: str
+    data: list[dict[str, Any]]
+
+@router.post("/parse", summary="Parse an array of torrent titles", operation_id="parse_torrent_titles")
+async def parse_torrent_titles(request: Request, titles: list[str]) -> ParseTorrentTitleResponse:
+    parsed_titles = []
+    if titles:
+        for title in titles:
+            data = {}
+            data["raw_title"] = title
+            parsed_data = parse_title(title)
+            data = {**data, **parsed_data}
+            parsed_titles.append(data)
+        if parsed_titles:
+            return ParseTorrentTitleResponse(message="Parsed torrent titles", data=parsed_titles)
+    else:
+        return ParseTorrentTitleResponse(message="No titles provided", data=[])

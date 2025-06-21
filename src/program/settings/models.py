@@ -49,6 +49,9 @@ class AllDebridModel(Observable):
     enabled: bool = False
     api_key: str = ""
 
+class TorBoxModel(Observable):
+    enabled: bool = False
+    api_key: str = ""
 
 class DownloadersModel(Observable):
     video_extensions: List[str] = ["mp4", "mkv", "avi"]
@@ -59,6 +62,7 @@ class DownloadersModel(Observable):
     proxy_url: str = ""
     real_debrid: RealDebridModel = RealDebridModel()
     all_debrid: AllDebridModel = AllDebridModel()
+    torbox: TorBoxModel = TorBoxModel()
 
 
 # Symlink Service
@@ -201,13 +205,6 @@ class KnightcrawlerConfig(Observable):
 class CometConfig(Observable):
     enabled: bool = False
     url: str = "http://localhost:8000"
-    indexers: List[str] = [
-        "bitsearch",
-        "eztv",
-        "thepiratebay",
-        "therarbg",
-        "yts"
-    ]
     timeout: int = 30
     ratelimit: bool = True
 
@@ -221,7 +218,7 @@ class ZileanConfig(Observable):
 
 class MediafusionConfig(Observable):
     enabled: bool = False
-    url: str = "https://mediafusion.elfhosted.com"
+    url: str = "http://localhost:8000"
     timeout: int = 30
     ratelimit: bool = True
 
@@ -257,12 +254,13 @@ class ProwlarrConfig(Observable):
 
 class ScraperModel(Observable):
     after_2: float = 2
-    after_5: int = 6
-    after_10: int = 24
+    after_5: float = 6
+    after_10: float = 24
     parse_debug: bool = False
     enable_aliases: bool = True
     bucket_limit: int = Field(default=5, ge=0, le=20)
     max_failed_attempts: int = Field(default=0, ge=0, le=10)
+    dubbed_anime_only: bool = False
     torrentio: TorrentioConfig = TorrentioConfig()
     knightcrawler: KnightcrawlerConfig = KnightcrawlerConfig()
     jackett: JackettConfig = JackettConfig()
@@ -291,8 +289,7 @@ class DatabaseModel(Observable):
 
 class NotificationsModel(Observable):
     enabled: bool = False
-    title: str = "Riven completed something!"
-    on_item_type: List[str] = ["movie", "show", "season"]
+    on_item_type: List[str] = ["movie", "show", "season", "episode"]
     service_urls: List[str] = []
 
 class SubliminalConfig(Observable):
